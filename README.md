@@ -33,7 +33,7 @@ Direct Exa `/search` access with:
 
 - `type`
 - `numResults`
-- `category`: `company`, `people`, `research paper`, `news`, `personal site`, `financial report`
+- `category`: `company`, `people`, `research paper`, `news`, `personal site`, `financial report`, `pdf`, `github`
 - domain filters
 - date filters
 - `includeText`
@@ -56,9 +56,9 @@ Direct Exa `/search` access with:
 - `timeoutMs`
 - raw request `body`
 
-`text`, `highlights`, `summary`, `maxAgeHours`, `livecrawlTimeout`, `subpages`, `subpageTarget`, and `extras` are mapped into the nested `/search` `contents` object. `additionalQueries` requires `type` to be `deep-lite`, `deep`, or `deep-reasoning`.
+`text`, `highlights`, `summary`, `maxAgeHours`, `livecrawlTimeout`, `subpages`, `subpageTarget`, and `extras` are mapped into the nested `/search` `contents` object. `text.verbosity` accepts `compact`, `standard`, and `full`.
 
-For `category: "company"` and `category: "people"`, date filters, text filters, and `excludeDomains` are rejected locally because the Search API does not support them. For `category: "people"`, `includeDomains` only accepts LinkedIn domains.
+The latest coding-agent docs list six official categories and omit `pdf` and `github`, but live API tests on 2026-05-25 returned 200 for both. They are supported here as live-tested categories. `category: "company"` rejects date filters locally. `category: "people"` rejects date filters, text filters, and `excludeDomains`; `includeDomains` must use LinkedIn domains. `category: "github"` rejects `excludeDomains`.
 
 ### `exa_contents_full`
 
@@ -80,3 +80,5 @@ Direct Exa `/contents` access for known URLs or result IDs with:
 - raw request `body`
 
 `contents` is accepted as a convenience alias for top-level `/contents` options. Unlike `/search`, `/contents` keeps `text`, `highlights`, `summary`, freshness controls, subpage controls, and extras at the request top level.
+
+`text.verbosity` accepts `compact`, `standard`, and `full`.

@@ -1,6 +1,6 @@
 {
   "name": "exa-search-full-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Full Exa Search API MCP server with deep search and structured output support",
   "private": true,
   "type": "module",

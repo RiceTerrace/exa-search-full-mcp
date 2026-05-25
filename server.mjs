@@ -24,20 +24,24 @@ const SEARCH_TYPES = [
   "deep",
   "deep-reasoning"
 ];
-const DEEP_SEARCH_TYPES = ["deep-lite", "deep", "deep-reasoning"];
 const SEARCH_CATEGORIES = [
   "company",
   "research paper",
   "news",
+  "pdf",
+  "github",
   "personal site",
   "people",
   "financial report"
 ];
-const COMPANY_PEOPLE_UNSUPPORTED_FILTERS = [
+const DATE_FILTERS = [
   "startPublishedDate",
   "endPublishedDate",
   "startCrawlDate",
-  "endCrawlDate",
+  "endCrawlDate"
+];
+const PEOPLE_UNSUPPORTED_FILTERS = [
+  ...DATE_FILTERS,
   "excludeDomains",
   "includeText",
   "excludeText"
@@ -132,8 +136,19 @@ function validateSearchArgs(args) {
     return;
   }
 
-  if (args.category === "company" || args.category === "people") {
-    const unsupported = COMPANY_PEOPLE_UNSUPPORTED_FILTERS.filter((field) =>
+  if (args.category === "company") {
+    const unsupported = DATE_FILTERS.filter((field) =>
+      hasFilterValue(args[field])
+    );
+    if (unsupported.length > 0) {
+      throw new Error(
+        `category "${args.category}" does not support ${unsupported.join(", ")}`
+      );
+    }
+  }
+
+  if (args.category === "people") {
+    const unsupported = PEOPLE_UNSUPPORTED_FILTERS.filter((field) =>
       hasFilterValue(args[field])
     );
     if (unsupported.length > 0) {
@@ -152,11 +167,11 @@ function validateSearchArgs(args) {
   }
 
   if (
-    Array.isArray(args.additionalQueries) &&
-    args.additionalQueries.length > 0 &&
-    !DEEP_SEARCH_TYPES.includes(args.type)
+    args.category === "github" &&
+    Array.isArray(args.excludeDomains) &&
+    args.excludeDomains.length > 0
   ) {
-    throw new Error("additionalQueries requires type deep-lite, deep, or deep-reasoning");
+    throw new Error('category "github" does not support excludeDomains');
   }
 }
 
@@ -301,7 +316,7 @@ server.registerTool(
         .enum(SEARCH_CATEGORIES)
         .optional()
         .describe(
-          "Optional Exa category: company, people, news, research paper, personal site, or financial report."
+          "Optional Exa category: company, people, news, research paper, personal site, financial report, plus live-tested undocumented pdf and github."
         ),
       includeDomains: z.array(z.string()).max(1200).optional(),
       excludeDomains: z.array(z.string()).max(1200).optional(),

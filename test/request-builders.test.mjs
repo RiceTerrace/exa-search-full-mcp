@@ -59,7 +59,7 @@ test("buildSearchBody maps content shortcuts into nested contents", () => {
   assert.deepEqual(
     buildSearchBody({
       query: "exa content options",
-      textMaxCharacters: 700,
+      text: { maxCharacters: 700, verbosity: "standard" },
       highlights: { query: "parameters", maxCharacters: 250 },
       summary: { query: "summarize api shape" },
       subpages: 2,
@@ -71,7 +71,7 @@ test("buildSearchBody maps content shortcuts into nested contents", () => {
       query: "exa content options",
       type: "auto",
       contents: {
-        text: { maxCharacters: 700 },
+        text: { maxCharacters: 700, verbosity: "standard" },
         highlights: { query: "parameters", maxCharacters: 250 },
         summary: { query: "summarize api shape" },
         subpages: 2,
@@ -98,15 +98,63 @@ test("buildSearchBody maps freshness controls into contents", () => {
   );
 });
 
-test("buildSearchBody rejects unsupported company filters", () => {
+test("buildSearchBody accepts live-tested undocumented categories", () => {
+  assert.deepEqual(
+    buildSearchBody({
+      query: "machine learning benchmark",
+      category: "pdf"
+    }),
+    {
+      query: "machine learning benchmark",
+      type: "auto",
+      category: "pdf"
+    }
+  );
+
+  assert.deepEqual(
+    buildSearchBody({
+      query: "exa mcp server",
+      category: "github",
+      includeText: ["model context protocol"]
+    }),
+    {
+      query: "exa mcp server",
+      type: "auto",
+      category: "github",
+      includeText: ["model context protocol"]
+    }
+  );
+});
+
+test("buildSearchBody rejects unsupported company date filters", () => {
   assert.throws(
     () =>
       buildSearchBody({
         query: "ai companies",
         category: "company",
-        excludeDomains: ["example.com"]
+        startPublishedDate: "2025-01-01"
       }),
-    /category "company" does not support excludeDomains/
+    /category "company" does not support startPublishedDate/
+  );
+});
+
+test("buildSearchBody accepts live-tested company text and domain filters", () => {
+  assert.deepEqual(
+    buildSearchBody({
+      query: "ai companies",
+      category: "company",
+      excludeDomains: ["example.com"],
+      includeText: ["artificial intelligence"],
+      excludeText: ["crypto"]
+    }),
+    {
+      query: "ai companies",
+      type: "auto",
+      category: "company",
+      excludeDomains: ["example.com"],
+      includeText: ["artificial intelligence"],
+      excludeText: ["crypto"]
+    }
   );
 });
 
@@ -138,27 +186,52 @@ test("buildSearchBody accepts linkedin domains for people category", () => {
   );
 });
 
-test("buildSearchBody requires deep type for additional queries", () => {
+test("buildSearchBody rejects unsupported people filters", () => {
   assert.throws(
     () =>
       buildSearchBody({
-        query: "exa docs",
-        additionalQueries: ["exa contents docs"]
+        query: "ai researchers",
+        category: "people",
+        includeText: ["machine learning"]
       }),
-    /additionalQueries requires type/
+    /category "people" does not support includeText/
   );
 });
 
-test("buildSearchBody accepts additional queries for deep types", () => {
+test("buildSearchBody rejects unsupported github filters", () => {
+  assert.throws(
+    () =>
+      buildSearchBody({
+        query: "exa mcp server",
+        category: "github",
+        excludeDomains: ["example.com"]
+      }),
+    /category "github" does not support excludeDomains/
+  );
+});
+
+test("buildSearchBody accepts additional queries for non-deep search types", () => {
   assert.deepEqual(
     buildSearchBody({
       query: "exa docs",
-      type: "deep-lite",
       additionalQueries: ["exa contents docs"]
     }),
     {
       query: "exa docs",
-      type: "deep-lite",
+      type: "auto",
+      additionalQueries: ["exa contents docs"]
+    }
+  );
+
+  assert.deepEqual(
+    buildSearchBody({
+      query: "exa docs",
+      type: "fast",
+      additionalQueries: ["exa contents docs"]
+    }),
+    {
+      query: "exa docs",
+      type: "fast",
       additionalQueries: ["exa contents docs"]
     }
   );
@@ -198,6 +271,19 @@ test("buildContentsBody supports subpages extras and compliance", () => {
       subpageTarget: "docs",
       extras: { imageLinks: 2 },
       compliance: "hipaa"
+    }
+  );
+});
+
+test("buildContentsBody supports standard text verbosity", () => {
+  assert.deepEqual(
+    buildContentsBody({
+      urls: ["https://example.com"],
+      text: { maxCharacters: 1000, verbosity: "standard" }
+    }),
+    {
+      urls: ["https://example.com"],
+      text: { maxCharacters: 1000, verbosity: "standard" }
     }
   );
 });
