@@ -1,11 +1,14 @@
 {
   "name": "exa-search-full-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Full Exa Search API MCP server with deep search and structured output support",
   "private": true,
   "type": "module",
   "bin": {
     "exa-search-full-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"

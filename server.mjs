@@ -1,9 +1,15 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
 const EXA_API_BASE = process.env.EXA_API_BASE || "https://api.exa.ai";
+const configuredTimeoutMs = Number(process.env.EXA_TIMEOUT_MS);
+const DEFAULT_TIMEOUT_MS =
+  Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+    ? configuredTimeoutMs
+    : 60000;
 const SEARCH_TYPES = [
   "auto",
   "fast",
@@ -19,13 +25,15 @@ function definedEntries(object) {
   );
 }
 
-function deepClone(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
-
 function truncate(value, maxChars = 1200) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}...`;
+}
+
+function jsonText(value, pretty = false) {
+  return typeof value === "string"
+    ? value
+    : JSON.stringify(value, null, pretty ? 2 : 0);
 }
 
 function apiKey() {
@@ -36,15 +44,30 @@ function apiKey() {
   return key;
 }
 
-async function exaPost(path, body) {
-  const response = await fetch(`${EXA_API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey()
-    },
-    body: JSON.stringify(body)
-  });
+async function exaPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  timeout.unref?.();
+
+  let response;
+  try {
+    response = await fetch(`${EXA_API_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey()
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Exa API request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const raw = await response.text();
   let parsed;
@@ -61,20 +84,24 @@ async function exaPost(path, body) {
   return parsed;
 }
 
-function buildSearchBody(args) {
-  if (args.body) {
-    return deepClone(args.body);
+export function buildSearchBody(args) {
+  if (args.body !== undefined) {
+    return args.body;
   }
 
   if (!args.query) {
     throw new Error("query is required unless body is provided");
   }
 
+  const hasContentControl =
+    args.maxAgeHours !== undefined || args.livecrawlTimeout !== undefined;
   const contents = args.contents
-    ? deepClone(args.contents)
-    : args.defaultHighlights === false
-      ? undefined
-      : { highlights: true };
+    ? { ...args.contents }
+    : args.defaultHighlights === true
+      ? { highlights: true }
+      : hasContentControl
+        ? {}
+      : undefined;
 
   if (contents && args.maxAgeHours !== undefined) {
     contents.maxAgeHours = args.maxAgeHours;
@@ -99,35 +126,52 @@ function buildSearchBody(args) {
     userLocation: args.userLocation,
     moderation: args.moderation,
     additionalQueries: args.additionalQueries,
+    systemPrompt: args.systemPrompt,
+    compliance: args.compliance,
+    stream: args.stream,
     contents,
     outputSchema: args.outputSchema
   });
 }
 
-function buildContentsBody(args) {
-  if (args.body) {
-    return deepClone(args.body);
+export function buildContentsBody(args) {
+  if (args.body !== undefined) {
+    return args.body;
   }
 
-  const ids = args.ids || args.urls;
-  if (!ids || ids.length === 0) {
+  if ((!args.ids || args.ids.length === 0) && (!args.urls || args.urls.length === 0)) {
     throw new Error("ids or urls is required unless body is provided");
   }
 
-  const contents = args.contents
-    ? deepClone(args.contents)
+  const locator =
+    Array.isArray(args.urls) && args.urls.length > 0
+      ? { urls: args.urls }
+      : { ids: args.ids };
+  const contentOptions = args.contents
+    ? { ...args.contents }
     : definedEntries({
-        text: args.textMaxCharacters
-          ? { maxCharacters: args.textMaxCharacters }
-          : undefined,
+        text:
+          args.text !== undefined
+            ? args.text
+            : args.textMaxCharacters
+              ? { maxCharacters: args.textMaxCharacters }
+              : undefined,
         highlights: args.highlights,
         summary: args.summary
       });
 
+  const options = definedEntries({
+    maxAgeHours: args.maxAgeHours,
+    livecrawlTimeout: args.livecrawlTimeout,
+    subpages: args.subpages,
+    subpageTarget: args.subpageTarget,
+    extras: args.extras
+  });
+
   return definedEntries({
-    ids,
-    contents: Object.keys(contents).length > 0 ? contents : { text: true },
-    maxAgeHours: args.maxAgeHours
+    ...locator,
+    ...contentOptions,
+    ...options
   });
 }
 
@@ -199,6 +243,22 @@ server.registerTool(
         .array(z.string())
         .optional()
         .describe("Additional query variations for coverage."),
+      systemPrompt: z
+        .string()
+        .optional()
+        .describe(
+          "Instructions for synthesized output and deep-search planning."
+        ),
+      compliance: z
+        .string()
+        .optional()
+        .describe("Enterprise compliance mode, for example hipaa."),
+      stream: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, Exa returns server-sent event text instead of a single JSON body."
+        ),
       contents: looseObject
         .optional()
         .describe(
@@ -222,7 +282,17 @@ server.registerTool(
       defaultHighlights: z
         .boolean()
         .optional()
-        .describe("Defaults to true. Set false to avoid adding highlights.")
+        .describe("Set true to add contents.highlights when contents is absent."),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Request timeout in milliseconds."),
+      pretty: z
+        .boolean()
+        .optional()
+        .describe("Pretty-print returned JSON. Defaults to compact output.")
     },
     annotations: {
       readOnlyHint: true,
@@ -233,9 +303,9 @@ server.registerTool(
   },
   async (args) => {
     const requestBody = buildSearchBody(args);
-    const result = await exaPost("/search", requestBody);
+    const result = await exaPost("/search", requestBody, args.timeoutMs);
     return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      content: [{ type: "text", text: jsonText(result, args.pretty) }]
     };
   }
 );
@@ -256,19 +326,44 @@ server.registerTool(
       urls: z.array(z.string()).optional().describe("Alias for ids."),
       contents: looseObject
         .optional()
-        .describe("Exa contents object for /contents."),
+        .describe("Alias object for top-level /contents options."),
+      text: z.union([z.boolean(), looseObject]).optional(),
       textMaxCharacters: z
         .number()
         .int()
         .positive()
         .optional()
         .describe("Convenience for contents.text.maxCharacters."),
-      highlights: z.boolean().optional(),
+      highlights: z.union([z.boolean(), looseObject]).optional(),
       summary: z.union([z.boolean(), looseObject]).optional(),
       maxAgeHours: z
         .number()
         .optional()
-        .describe("Content freshness control. Use 0 to force livecrawl.")
+        .describe("Content freshness control. Use 0 to force livecrawl."),
+      livecrawlTimeout: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Livecrawl timeout in milliseconds."),
+      subpages: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Number of subpages to crawl from each URL."),
+      subpageTarget: z.union([z.string(), z.array(z.string())]).optional(),
+      extras: looseObject.optional(),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Request timeout in milliseconds."),
+      pretty: z
+        .boolean()
+        .optional()
+        .describe("Pretty-print returned JSON. Defaults to compact output.")
     },
     annotations: {
       readOnlyHint: true,
@@ -279,19 +374,21 @@ server.registerTool(
   },
   async (args) => {
     const requestBody = buildContentsBody(args);
-    const result = await exaPost("/contents", requestBody);
+    const result = await exaPost("/contents", requestBody, args.timeoutMs);
     return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      content: [{ type: "text", text: jsonText(result, args.pretty) }]
     };
   }
 );
 
-async function main() {
+export async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}
