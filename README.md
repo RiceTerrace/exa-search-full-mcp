@@ -33,14 +33,32 @@ Direct Exa `/search` access with:
 
 - `type`
 - `numResults`
-- `category`
+- `category`: `company`, `people`, `research paper`, `news`, `personal site`, `financial report`
 - domain filters
 - date filters
+- `includeText`
+- `excludeText`
+- `additionalQueries`
 - `systemPrompt`
 - `contents`
+- `text`
+- `textMaxCharacters`
+- `highlights`
+- `summary`
+- `maxAgeHours`
+- `livecrawlTimeout`
+- `subpages`
+- `subpageTarget`
+- `extras`
 - `outputSchema`
+- `compliance`
+- `stream`
 - `timeoutMs`
 - raw request `body`
+
+`text`, `highlights`, `summary`, `maxAgeHours`, `livecrawlTimeout`, `subpages`, `subpageTarget`, and `extras` are mapped into the nested `/search` `contents` object. `additionalQueries` requires `type` to be `deep-lite`, `deep`, or `deep-reasoning`.
+
+For `category: "company"` and `category: "people"`, date filters, text filters, and `excludeDomains` are rejected locally because the Search API does not support them. For `category: "people"`, `includeDomains` only accepts LinkedIn domains.
 
 ### `exa_contents_full`
 
@@ -55,6 +73,10 @@ Direct Exa `/contents` access for known URLs or result IDs with:
 - `maxAgeHours`
 - `livecrawlTimeout`
 - `subpages`
+- `subpageTarget`
 - `extras`
+- `compliance`
 - `timeoutMs`
 - raw request `body`
+
+`contents` is accepted as a convenience alias for top-level `/contents` options. Unlike `/search`, `/contents` keeps `text`, `highlights`, `summary`, freshness controls, subpage controls, and extras at the request top level.

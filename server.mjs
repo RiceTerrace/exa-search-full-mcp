@@ -1,10 +1,16 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const EXA_API_BASE = process.env.EXA_API_BASE || "https://api.exa.ai";
+const packageJson = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8")
+);
+const EXA_API_BASE = (
+  process.env.EXA_API_BASE?.trim() || "https://api.exa.ai"
+).replace(/\/+$/, "");
 const configuredTimeoutMs = Number(process.env.EXA_TIMEOUT_MS);
 const DEFAULT_TIMEOUT_MS =
   Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
@@ -17,6 +23,24 @@ const SEARCH_TYPES = [
   "deep-lite",
   "deep",
   "deep-reasoning"
+];
+const DEEP_SEARCH_TYPES = ["deep-lite", "deep", "deep-reasoning"];
+const SEARCH_CATEGORIES = [
+  "company",
+  "research paper",
+  "news",
+  "personal site",
+  "people",
+  "financial report"
+];
+const COMPANY_PEOPLE_UNSUPPORTED_FILTERS = [
+  "startPublishedDate",
+  "endPublishedDate",
+  "startCrawlDate",
+  "endCrawlDate",
+  "excludeDomains",
+  "includeText",
+  "excludeText"
 ];
 
 function definedEntries(object) {
@@ -37,11 +61,103 @@ function jsonText(value, pretty = false) {
 }
 
 function apiKey() {
-  const key = process.env.EXA_API_KEY;
+  const key = process.env.EXA_API_KEY?.trim();
   if (!key) {
     throw new Error("EXA_API_KEY is not set");
   }
   return key;
+}
+
+function buildContentFields(args, options = {}) {
+  const fields = args.contents ? { ...args.contents } : {};
+
+  if (args.text !== undefined) {
+    fields.text = args.text;
+  } else if (args.textMaxCharacters !== undefined) {
+    fields.text = { maxCharacters: args.textMaxCharacters };
+  }
+
+  if (args.highlights !== undefined) {
+    fields.highlights = args.highlights;
+  } else if (
+    options.defaultHighlights === true &&
+    args.defaultHighlights === true &&
+    args.contents === undefined &&
+    fields.highlights === undefined
+  ) {
+    fields.highlights = true;
+  }
+
+  if (args.summary !== undefined) {
+    fields.summary = args.summary;
+  }
+  if (args.subpages !== undefined) {
+    fields.subpages = args.subpages;
+  }
+  if (args.subpageTarget !== undefined) {
+    fields.subpageTarget = args.subpageTarget;
+  }
+  if (args.extras !== undefined) {
+    fields.extras = args.extras;
+  }
+  if (args.maxAgeHours !== undefined) {
+    fields.maxAgeHours = args.maxAgeHours;
+  }
+  if (args.livecrawlTimeout !== undefined) {
+    fields.livecrawlTimeout = args.livecrawlTimeout;
+  }
+
+  return fields;
+}
+
+function hasFilterValue(value) {
+  return Array.isArray(value) ? value.length > 0 : value !== undefined;
+}
+
+function normalizedDomain(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .split("/")[0]
+    .replace(/^www\./, "");
+}
+
+function isLinkedInDomain(value) {
+  const domain = normalizedDomain(value);
+  return domain === "linkedin.com" || domain.endsWith(".linkedin.com");
+}
+
+function validateSearchArgs(args) {
+  if (args.body !== undefined) {
+    return;
+  }
+
+  if (args.category === "company" || args.category === "people") {
+    const unsupported = COMPANY_PEOPLE_UNSUPPORTED_FILTERS.filter((field) =>
+      hasFilterValue(args[field])
+    );
+    if (unsupported.length > 0) {
+      throw new Error(
+        `category "${args.category}" does not support ${unsupported.join(", ")}`
+      );
+    }
+  }
+
+  if (
+    args.category === "people" &&
+    Array.isArray(args.includeDomains) &&
+    args.includeDomains.some((domain) => !isLinkedInDomain(domain))
+  ) {
+    throw new Error('category "people" includeDomains only accepts LinkedIn domains');
+  }
+
+  if (
+    Array.isArray(args.additionalQueries) &&
+    args.additionalQueries.length > 0 &&
+    !DEEP_SEARCH_TYPES.includes(args.type)
+  ) {
+    throw new Error("additionalQueries requires type deep-lite, deep, or deep-reasoning");
+  }
 }
 
 async function exaPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -70,11 +186,14 @@ async function exaPost(path, body, timeoutMs = DEFAULT_TIMEOUT_MS) {
   }
 
   const raw = await response.text();
-  let parsed;
-  try {
-    parsed = raw ? JSON.parse(raw) : {};
-  } catch {
-    parsed = raw;
+  const contentType = response.headers.get("content-type") || "";
+  let parsed = raw || {};
+  if (raw && (contentType.includes("application/json") || contentType.includes("+json"))) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = raw;
+    }
   }
 
   if (!response.ok) {
@@ -89,26 +208,15 @@ export function buildSearchBody(args) {
     return args.body;
   }
 
+  validateSearchArgs(args);
+
   if (!args.query) {
     throw new Error("query is required unless body is provided");
   }
 
-  const hasContentControl =
-    args.maxAgeHours !== undefined || args.livecrawlTimeout !== undefined;
-  const contents = args.contents
-    ? { ...args.contents }
-    : args.defaultHighlights === true
-      ? { highlights: true }
-      : hasContentControl
-        ? {}
-      : undefined;
-
-  if (contents && args.maxAgeHours !== undefined) {
-    contents.maxAgeHours = args.maxAgeHours;
-  }
-  if (contents && args.livecrawlTimeout !== undefined) {
-    contents.livecrawlTimeout = args.livecrawlTimeout;
-  }
+  const contentFields = buildContentFields(args, { defaultHighlights: true });
+  const contents =
+    Object.keys(contentFields).length > 0 ? contentFields : undefined;
 
   return definedEntries({
     query: args.query,
@@ -147,31 +255,12 @@ export function buildContentsBody(args) {
     Array.isArray(args.urls) && args.urls.length > 0
       ? { urls: args.urls }
       : { ids: args.ids };
-  const contentOptions = args.contents
-    ? { ...args.contents }
-    : definedEntries({
-        text:
-          args.text !== undefined
-            ? args.text
-            : args.textMaxCharacters
-              ? { maxCharacters: args.textMaxCharacters }
-              : undefined,
-        highlights: args.highlights,
-        summary: args.summary
-      });
-
-  const options = definedEntries({
-    maxAgeHours: args.maxAgeHours,
-    livecrawlTimeout: args.livecrawlTimeout,
-    subpages: args.subpages,
-    subpageTarget: args.subpageTarget,
-    extras: args.extras
-  });
+  const contentOptions = buildContentFields(args);
 
   return definedEntries({
     ...locator,
     ...contentOptions,
-    ...options
+    compliance: args.compliance
   });
 }
 
@@ -179,7 +268,7 @@ const looseObject = z.record(z.string(), z.unknown());
 
 const server = new McpServer({
   name: "exa-search-full",
-  version: "1.0.0"
+  version: packageJson.version
 });
 
 server.registerTool(
@@ -209,13 +298,13 @@ server.registerTool(
         .optional()
         .describe("Number of search results to return."),
       category: z
-        .string()
+        .enum(SEARCH_CATEGORIES)
         .optional()
         .describe(
-          "Optional Exa category, such as company, people, news, github, pdf, research paper, personal site, or financial report."
+          "Optional Exa category: company, people, news, research paper, personal site, or financial report."
         ),
-      includeDomains: z.array(z.string()).optional(),
-      excludeDomains: z.array(z.string()).optional(),
+      includeDomains: z.array(z.string()).max(1200).optional(),
+      excludeDomains: z.array(z.string()).max(1200).optional(),
       startPublishedDate: z
         .string()
         .optional()
@@ -232,8 +321,8 @@ server.registerTool(
         .string()
         .optional()
         .describe("Only include pages crawled before this date, YYYY-MM-DD."),
-      includeText: z.array(z.string()).optional(),
-      excludeText: z.array(z.string()).optional(),
+      includeText: z.array(z.string()).max(1).optional(),
+      excludeText: z.array(z.string()).max(1).optional(),
       userLocation: z
         .string()
         .optional()
@@ -241,6 +330,7 @@ server.registerTool(
       moderation: z.boolean().optional(),
       additionalQueries: z
         .array(z.string())
+        .max(10)
         .optional()
         .describe("Additional query variations for coverage."),
       systemPrompt: z
@@ -264,6 +354,23 @@ server.registerTool(
         .describe(
           "Exa contents object, for example {\"highlights\": true}, {\"text\":{\"maxCharacters\":10000}}, or {\"summary\":{\"query\":\"...\"}}."
         ),
+      text: z.union([z.boolean(), looseObject]).optional(),
+      textMaxCharacters: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Convenience for contents.text.maxCharacters."),
+      highlights: z.union([z.boolean(), looseObject]).optional(),
+      summary: z.union([z.boolean(), looseObject]).optional(),
+      subpages: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Mapped to contents.subpages."),
+      subpageTarget: z.union([z.string(), z.array(z.string())]).optional(),
+      extras: looseObject.optional(),
       outputSchema: looseObject
         .optional()
         .describe(
@@ -271,6 +378,7 @@ server.registerTool(
         ),
       maxAgeHours: z
         .number()
+        .int()
         .optional()
         .describe("Mapped to contents.maxAgeHours. Use 0 to force livecrawl."),
       livecrawlTimeout: z
@@ -322,8 +430,16 @@ server.registerTool(
         .describe(
           "Raw Exa /contents request body. If provided, all other fields are ignored."
         ),
-      ids: z.array(z.string()).optional().describe("URLs or Exa result IDs."),
-      urls: z.array(z.string()).optional().describe("Alias for ids."),
+      ids: z
+        .array(z.string().min(1).max(2048))
+        .max(100)
+        .optional()
+        .describe("URLs or Exa result IDs."),
+      urls: z
+        .array(z.string().min(1).max(2048))
+        .max(100)
+        .optional()
+        .describe("Alias for ids."),
       contents: looseObject
         .optional()
         .describe("Alias object for top-level /contents options."),
@@ -338,6 +454,7 @@ server.registerTool(
       summary: z.union([z.boolean(), looseObject]).optional(),
       maxAgeHours: z
         .number()
+        .int()
         .optional()
         .describe("Content freshness control. Use 0 to force livecrawl."),
       livecrawlTimeout: z
@@ -349,11 +466,15 @@ server.registerTool(
       subpages: z
         .number()
         .int()
-        .positive()
+        .min(0)
         .optional()
         .describe("Number of subpages to crawl from each URL."),
       subpageTarget: z.union([z.string(), z.array(z.string())]).optional(),
       extras: looseObject.optional(),
+      compliance: z
+        .string()
+        .optional()
+        .describe("Enterprise compliance mode, for example hipaa."),
       timeoutMs: z
         .number()
         .int()
