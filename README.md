@@ -16,8 +16,7 @@
 
 ## 本地安装（推荐）
 
-本项目推荐使用固定的本地副本运行 MCP 服务器。Codex 启动时直接执行本地
-`server.mjs`，不会临时下载或解析 GitHub 包。
+本项目推荐使用固定的本地副本运行 MCP 服务器。
 
 ### 环境要求
 
@@ -34,16 +33,12 @@ npm ci --omit=dev
 npm test
 ```
 
-请保留该目录；Codex 配置会通过绝对路径直接启动其中的 `server.mjs`。
-
 ### 2. 配置 Codex
 
 打开 Codex 的全局配置文件：
 
 - Windows：`%USERPROFILE%\.codex\config.toml`
 - macOS/Linux：`~/.codex/config.toml`
-
-加入以下配置，并替换示例路径和 Exa API 密钥：
 
 ```toml
 [mcp_servers.exa-search-full]
@@ -55,7 +50,7 @@ startup_timeout_sec = 30
 EXA_API_KEY = "your_key"
 ```
 
-必须使用绝对路径。Windows 建议使用正斜杠，避免 TOML 反斜杠转义：
+Windows 建议使用正斜杠，避免 TOML 反斜杠转义：
 
 ```toml
 args = ["C:/Users/you/.codex/mcp/exa-search-full/server.mjs"]
@@ -87,9 +82,6 @@ codex mcp list
 
 也可以在 Codex 终端界面中执行 `/mcp` 查看已启用的服务器。
 
-首次克隆并执行 `npm ci` 后，MCP 的启动过程完全在本地完成，不需要访问
-GitHub。调用 Exa Search API 时仍然需要网络连接。
-
 ### 更新
 
 需要升级时，在本地仓库中显式执行：
@@ -102,17 +94,6 @@ npm audit --omit=dev
 ```
 
 更新完成后重启 Codex。
-
-### 为什么不使用 `npx` 远程启动
-
-通过 GitHub 包地址运行 `npx` 时，npm 可能在每次启动时重新解析远程仓库，
-部分环境还可能把 GitHub 地址转换为 SSH，从而受到网络、端口和认证状态影响。
-固定本地安装具有以下优点：
-
-- MCP 启动不依赖 GitHub 或 npm 网络状态
-- 启动时间稳定，不容易触发客户端超时
-- 依赖版本由 `package-lock.json` 固定
-- 升级时机明确，可在更新前后运行测试和安全审计
 
 ## 工具
 
@@ -149,10 +130,6 @@ npm audit --omit=dev
 `text`、`highlights`、`summary`、`maxAgeHours`、`livecrawlTimeout`、
 `subpages`、`subpageTarget` 和 `extras` 会映射到 `/search` 请求中的
 `contents` 对象。`text.verbosity` 支持 `compact`、`standard` 和 `full`。
-
-Exa 面向编码代理的最新文档列出了六个正式分类，没有列出 `pdf` 和 `github`；但在
-2026-05-25 的真实 API 测试中，这两个分类均返回 HTTP 200，因此本项目将其
-作为已实测分类支持。
 
 分类限制：
 
