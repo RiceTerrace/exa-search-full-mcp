@@ -11,19 +11,78 @@ The `exa_search_full` tool supports Exa search types including `deep-lite`, `dee
 
 By default, `exa_search_full` does not request result contents. This keeps simple URL searches cheaper and faster. Pass `contents`, or set `defaultHighlights: true`, when you need excerpts, text, summaries, freshness controls, or subpage crawling.
 
-## Install
+## Install locally
 
-Set your Exa API key:
+Run the MCP server from a fixed local checkout. This avoids downloading or
+resolving the GitHub package every time Codex starts the server.
+
+### Requirements
+
+- Node.js 20 or newer
+- npm
+- Git
+
+### 1. Clone and install
 
 ```bash
-export EXA_API_KEY="your_key"
+git clone https://github.com/RiceTerrace/exa-search-full-mcp.git
+cd exa-search-full-mcp
+npm ci --omit=dev
 ```
 
-Add it to Codex:
+Keep this directory in place because Codex will launch `server.mjs` directly
+from it.
+
+### 2. Configure Codex
+
+Open your global Codex configuration file:
+
+- macOS/Linux: `~/.codex/config.toml`
+- Windows: `%USERPROFILE%\.codex\config.toml`
+
+Add the following configuration and replace the example path and API key:
+
+```toml
+[mcp_servers.exa-search-full]
+command = "node"
+args = ["/absolute/path/to/exa-search-full-mcp/server.mjs"]
+startup_timeout_sec = 30
+
+[mcp_servers.exa-search-full.env]
+EXA_API_KEY = "your_key"
+```
+
+Always use an absolute path. On Windows, forward slashes avoid TOML escaping:
+
+```toml
+args = ["C:/Users/you/.codex/mcp/exa-search-full/server.mjs"]
+```
+
+If Codex cannot find `node` through `PATH`, set `command` to the absolute path
+of the Node.js executable. If `EXA_API_KEY` is already inherited by the Codex
+process, you can omit the `[mcp_servers.exa-search-full.env]` table.
+
+### 3. Restart and verify
+
+Restart Codex, then check the registration:
 
 ```bash
-codex mcp add exa-search-full -- npx -y github:RiceTerrace/exa-search-full-mcp
+codex mcp list
 ```
+
+After the initial clone and `npm ci`, MCP startup is fully local and does not
+require GitHub access. Calls to the Exa API still require internet access.
+
+### Update
+
+Update the local checkout explicitly when you want a newer version:
+
+```bash
+git pull --ff-only
+npm ci --omit=dev
+```
+
+Restart Codex after updating.
 
 ## Tools
 
