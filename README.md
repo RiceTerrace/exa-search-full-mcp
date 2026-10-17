@@ -95,6 +95,35 @@ npm audit --omit=dev
 
 更新完成后重启 Codex。
 
+## 可选：在 Codex 中搭配 Parallel Search MCP
+
+如果需要先做轻量的网页搜索，再选择页面交给 Exa 提取内容，可以在同一个
+Codex 配置中添加独立的 [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)：
+
+```toml
+[mcp_servers.parallel-search]
+url = "https://search.parallel.ai/mcp"
+```
+
+把这段配置追加到 `config.toml`，保留上面的 `exa-search-full` 配置。Parallel
+通过 Streamable HTTP 连接，提供 `web_search` 和 `web_fetch`，无需在本地启动
+另一个 Node.js 进程。匿名使用无需 Parallel 账户或 API key，搜索使用 Fast
+模式，适合探索和轻量使用，有使用额度限制。
+
+重启 Codex 后，运行 `codex mcp list` 检查两个服务器的配置，再通过 `/mcp`
+检查连接和可用工具。配置列表本身不代表搜索请求已成功。
+
+例如，研究 MCP 的传输方式时，可以让 Codex：
+
+1. 使用 `parallel-search` 的 `web_search` 查找 stdio 和 Streamable HTTP 的官方文档。
+2. 将选中的 URL 传给 `exa-search-full` 的 `exa_contents_full`，设置
+   `textMaxCharacters: 4000` 提取正文；也可以使用 Parallel 的 `web_fetch` 阅读页面摘录。
+3. 根据提取的内容整理适用场景，并附上来源链接。需要 Exa 深度搜索或结构化结果时，
+   继续使用 `exa_search_full` 的 `type`、`contents` 和 `outputSchema` 参数。
+
+这两个服务器独立运行，不会自动切换或回退。调用 Exa 工具仍然需要
+`EXA_API_KEY`，并按 Exa 的计费规则使用；只使用 Parallel 时无需配置 Exa 密钥。
+
 ## 工具
 
 ### `exa_search_full`
